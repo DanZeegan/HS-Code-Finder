@@ -8,16 +8,6 @@ import json
 import time
 from io import BytesIO
 
-# Embedded API Keys
-GROQ_API_KEY = "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"
-HUGGINGFACE_API_KEY = "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"
-PEXELS_API_KEY = "fmQ9Eyr6rn8WGagZwhePDSRKHbd2FGELJDuGI19ChGAeU7eAXCrABJ5B"
-
-# Set environment variables
-os.environ['GROQ_API_KEY'] = GROQ_API_KEY
-os.environ['HUGGINGFACE_API_KEY'] = HUGGINGFACE_API_KEY
-os.environ['PEXELS_API_KEY'] = PEXELS_API_KEY
-
 # Page configuration
 st.set_page_config(
     page_title="HS Code Finder",
@@ -30,8 +20,10 @@ st.markdown("""
 <style>
     .product-card {
         background-color: white;
-        padding: 0px;
-        margin: 0px;
+        padding: 25px;
+        border-radius: 15px;
+        box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+        margin: 20px 0;
     }
     .info-label {
         font-weight: bold;
@@ -123,28 +115,14 @@ def generate_placeholder_image(product_name):
 def fetch_image_from_unsplash(product_name):
     """Fetch product image from Unsplash (free API)"""
     try:
-        # Clean product name for search
-        search_term = product_name.lower().replace(' ', '+')
+        # Unsplash API - no key required for basic usage
+        url = f"https://source.unsplash.com/400x400/?{product_name.replace(' ', ',')},food,agriculture"
         
-        # Try direct Unsplash source (simple method)
-        url = f"https://source.unsplash.com/featured/400x400/?{search_term},food,fruit,vegetable,agriculture"
+        response = requests.get(url, timeout=10)
         
-        response = requests.get(url, timeout=15, allow_redirects=True)
-        
-        if response.status_code == 200 and len(response.content) > 1000:
-            img = Image.open(BytesIO(response.content))
-            # Verify it's not a tiny placeholder
-            if img.size[0] > 100 and img.size[1] > 100:
-                return img
-        
-        # Fallback: try alternative search
-        url2 = f"https://source.unsplash.com/400x400/?{search_term}"
-        response2 = requests.get(url2, timeout=15, allow_redirects=True)
-        
-        if response2.status_code == 200 and len(response2.content) > 1000:
-            img = Image.open(BytesIO(response2.content))
-            if img.size[0] > 100 and img.size[1] > 100:
-                return img
+        if response.status_code == 200:
+            img = Image.open(io.BytesIO(response.content))
+            return img
         
         return None
     except Exception as e:
@@ -153,26 +131,24 @@ def fetch_image_from_unsplash(product_name):
 def fetch_image_from_pexels(product_name):
     """Fetch product image from Pexels (free API with key)"""
     try:
-        api_key = PEXELS_API_KEY
+        api_key = os.environ.get('PEXELS_API_KEY', '')
         
         if not api_key:
             return None
         
-        url = f"https://api.pexels.com/v1/search?query={product_name}&per_page=1&orientation=square"
+        url = f"https://api.pexels.com/v1/search?query={product_name}&per_page=1"
         headers = {"Authorization": api_key}
         
-        response = requests.get(url, headers=headers, timeout=15)
+        response = requests.get(url, headers=headers, timeout=10)
         
         if response.status_code == 200:
             data = response.json()
             if data.get('photos') and len(data['photos']) > 0:
                 image_url = data['photos'][0]['src']['medium']
-                img_response = requests.get(image_url, timeout=15)
+                img_response = requests.get(image_url, timeout=10)
                 
                 if img_response.status_code == 200:
-                    img = Image.open(BytesIO(img_response.content))
-                    # Resize to standard size
-                    img = img.resize((400, 400), Image.Resampling.LANCZOS)
+                    img = Image.open(io.BytesIO(img_response.content))
                     return img
         
         return None
@@ -201,14 +177,19 @@ def get_product_image(product_name, img_path):
     img.save(img_path)
     return img
 
-def get_info_from_groq(product_name, status_container):
+def get_info_from_groq(product_name):
     """
     Get product information using Groq's free LLM API
+    You can get a free API key from: https://console.groq.com/
     """
     try:
-        api_key = GROQ_API_KEY
+        # Check if API key is set
+        api_key = os.environ.get('GROQ_API_KEY', '')
         
         if not api_key:
+            st.warning("⚠️ GROQ_API_KEY not found in environment variables.")
+            st.info("To get accurate real-time data, please set your Groq API key as an environment variable.")
+            st.code("export GROQ_API_KEY='your_api_key_here'", language='bash')
             return None
         
         url = "https://api.groq.com/openai/v1/chat/completions"
@@ -241,7 +222,7 @@ IMPORTANT:
 - Return ONLY the JSON object, no markdown formatting, no explanations"""
 
         data = {
-            "model": "llama-3.3-70b-versatile",
+            "model": "llama-3.3-70b-versatile",  # Free tier model
             "messages": [
                 {
                     "role": "user",
@@ -267,22 +248,26 @@ IMPORTANT:
             
             # Parse JSON
             product_info = json.loads(content)
-            status_container.success("✅ Information retrieved from Groq AI")
             return product_info
         else:
+            st.error(f"API Error: {response.status_code} - {response.text}")
             return None
             
     except json.JSONDecodeError as e:
+        st.error(f"Failed to parse API response: {e}")
+        st.code(content)
         return None
     except Exception as e:
+        st.error(f"Error calling Groq API: {str(e)}")
         return None
 
-def get_info_from_huggingface(product_name, status_container):
+def get_info_from_huggingface(product_name):
     """
     Fallback: Get product information using Hugging Face Inference API (free)
+    You can get a free API key from: https://huggingface.co/settings/tokens
     """
     try:
-        api_key = HUGGINGFACE_API_KEY
+        api_key = os.environ.get('HUGGINGFACE_API_KEY', '')
         
         if not api_key:
             return None
@@ -332,7 +317,6 @@ Return only valid JSON:
             if start_idx != -1 and end_idx > start_idx:
                 json_str = content[start_idx:end_idx]
                 product_info = json.loads(json_str)
-                status_container.success("✅ Information retrieved from Hugging Face")
                 return product_info
         
         return None
@@ -340,9 +324,11 @@ Return only valid JSON:
     except Exception as e:
         return None
 
-def get_info_from_ollama(product_name, status_container):
+def get_info_from_ollama(product_name):
     """
     Get information from local Ollama instance (if running)
+    Install Ollama from: https://ollama.ai
+    Run: ollama pull llama2
     """
     try:
         url = "http://localhost:11434/api/generate"
@@ -374,7 +360,6 @@ Return ONLY valid JSON (no markdown, no extra text):
         if response.status_code == 200:
             result = response.json()
             product_info = json.loads(result['response'])
-            status_container.success("✅ Information retrieved from Ollama")
             return product_info
         
         return None
@@ -382,34 +367,37 @@ Return ONLY valid JSON (no markdown, no extra text):
     except Exception as e:
         return None
 
-def get_product_info_with_ai(product_name, status_container):
+def get_product_info_with_ai(product_name):
     """Try multiple AI sources to get accurate information"""
     
     # Try Groq first (best quality, free tier available)
-    status_container.info("🤖 Using AI to fetch accurate product information...")
-    product_info = get_info_from_groq(product_name, status_container)
+    st.info("🤖 Using AI to fetch accurate product information...")
+    product_info = get_info_from_groq(product_name)
     
     if product_info:
+        st.success("✅ Information retrieved from Groq AI")
         return product_info
     
     # Try Hugging Face as fallback
-    status_container.info("🔄 Trying Hugging Face API...")
-    product_info = get_info_from_huggingface(product_name, status_container)
+    st.info("🔄 Trying Hugging Face API...")
+    product_info = get_info_from_huggingface(product_name)
     
     if product_info:
+        st.success("✅ Information retrieved from Hugging Face")
         return product_info
     
     # Try local Ollama as final fallback
-    status_container.info("🔄 Checking for local Ollama instance...")
-    product_info = get_info_from_ollama(product_name, status_container)
+    st.info("🔄 Checking for local Ollama instance...")
+    product_info = get_info_from_ollama(product_name)
     
     if product_info:
+        st.success("✅ Information retrieved from Ollama")
         return product_info
     
     # If all fail, return None
     return None
 
-def save_to_csv(product_info, status_container):
+def save_to_csv(product_info):
     """Save new product information to CSV"""
     try:
         df = pd.read_csv('hs_data.csv')
@@ -426,9 +414,9 @@ def save_to_csv(product_info, status_container):
             df = pd.concat([df, new_df], ignore_index=True)
         
         df.to_csv('hs_data.csv', index=False)
-        status_container.success("💾 Product information saved to database!")
         return True
     except Exception as e:
+        st.error(f"Error saving to CSV: {str(e)}")
         return False
 
 def translate_text(text, target_lang):
@@ -443,7 +431,7 @@ def translate_text(text, target_lang):
     except Exception as e:
         return f"{text}"
 
-def search_product(product_name, language_code, status_container):
+def search_product(product_name, language_code):
     """Search for product in database or use AI"""
     try:
         # Load existing data
@@ -454,7 +442,7 @@ def search_product(product_name, language_code, status_container):
             result = df[df['common_name'].str.lower() == product_name.lower()]
             
             if not result.empty:
-                status_container.info("✅ Found in local database")
+                st.info("✅ Found in local database")
                 product_info = result.iloc[0].to_dict()
                 
                 # Translate if needed
@@ -469,8 +457,8 @@ def search_product(product_name, language_code, status_container):
                 return product_info
         
         # Not in database - use AI
-        status_container.info("🔍 Product not found in local database. Using AI to fetch information...")
-        product_info = get_product_info_with_ai(product_name, status_container)
+        st.info("🔍 Product not found in local database. Using AI to fetch information...")
+        product_info = get_product_info_with_ai(product_name)
         
         if product_info:
             # Validate the structure
@@ -483,7 +471,8 @@ def search_product(product_name, language_code, status_container):
                     product_info[field] = 'Not available'
             
             # Save to CSV for future use
-            save_to_csv(product_info, status_container)
+            if save_to_csv(product_info):
+                st.success("💾 Product information saved to database!")
             
             # Translate if needed
             if language_code != 'en':
@@ -499,7 +488,7 @@ def search_product(product_name, language_code, status_container):
             return None
     
     except Exception as e:
-        status_container.error(f"❌ Error searching product: {str(e)}")
+        st.error(f"❌ Error searching product: {str(e)}")
         return None
 
 # Initialize app
@@ -508,6 +497,73 @@ initialize_app()
 # Header
 st.title("🌾 HS Code Finder for Agriculture & Products")
 st.markdown("### AI-Powered Search for HS codes, scientific names, and classifications")
+
+# API Setup Instructions in Sidebar
+with st.sidebar:
+    st.header("⚙️ API Setup")
+    
+    # Option to enter API keys directly
+    st.subheader("🔑 Enter API Keys")
+    
+    groq_key = st.text_input("Groq API Key:", type="password", value=os.environ.get('GROQ_API_KEY', ''))
+    if groq_key:
+        os.environ['GROQ_API_KEY'] = groq_key
+    
+    hf_key = st.text_input("Hugging Face API Key:", type="password", value=os.environ.get('HUGGINGFACE_API_KEY', ''))
+    if hf_key:
+        os.environ['HUGGINGFACE_API_KEY'] = hf_key
+    
+    pexels_key = st.text_input("Pexels API Key (Optional - for better images):", type="password", value=os.environ.get('PEXELS_API_KEY', ''))
+    if pexels_key:
+        os.environ['PEXELS_API_KEY'] = pexels_key
+    
+    st.markdown("---")
+    
+    st.markdown("""
+    **How to get API keys:**
+    
+    **Option 1: Groq API (Recommended)**
+    1. Visit [console.groq.com](https://console.groq.com/)
+    2. Sign up for free
+    3. Get your API key
+    4. Paste it above
+    
+    **Option 2: Hugging Face**
+    1. Visit [huggingface.co](https://huggingface.co/settings/tokens)
+    2. Create free account
+    3. Generate token
+    4. Paste it above
+    
+    **Option 3: Pexels (For better images)**
+    1. Visit [pexels.com/api](https://www.pexels.com/api/)
+    2. Sign up for free
+    3. Get API key
+    4. Paste it above (optional)
+    
+    **Option 4: Local Ollama**
+    1. Install [Ollama](https://ollama.ai)
+    2. Run: `ollama pull llama2`
+    3. Start Ollama service
+    
+    **Note:** Images are automatically fetched from Unsplash (no key needed)
+    """)
+    
+    # Check API status
+    st.subheader("📊 API Status")
+    if os.environ.get('GROQ_API_KEY'):
+        st.success("✅ Groq API configured")
+    else:
+        st.warning("⚠️ Groq API not configured")
+    
+    if os.environ.get('HUGGINGFACE_API_KEY'):
+        st.success("✅ Hugging Face API configured")
+    else:
+        st.warning("⚠️ Hugging Face API not configured")
+    
+    if os.environ.get('PEXELS_API_KEY'):
+        st.success("✅ Pexels API configured (Better images)")
+    else:
+        st.info("ℹ️ Using Unsplash for images (no key needed)")
 
 # Language selection
 languages = {
@@ -524,16 +580,11 @@ languages = {
 
 col1, col2 = st.columns([3, 1])
 with col1:
-    product_input = st.text_input("🔍 Enter product name:", placeholder="e.g., Apple, Banana, Rice, Coconut Oil, Turmeric...", key="product_search")
+    product_input = st.text_input("🔍 Enter product name:", placeholder="e.g., Apple, Banana, Rice, Coconut Oil, Turmeric...")
 with col2:
     selected_language = st.selectbox("🌐 Language:", list(languages.keys()))
 
 search_button = st.button("🔎 Search", use_container_width=True)
-
-# Trigger search on Enter key press
-if product_input and product_input != st.session_state.get('last_search', ''):
-    search_button = True
-    st.session_state['last_search'] = product_input
 
 # Example products
 st.markdown("**💡 Try searching for:** Apple, Banana, Rice, Wheat, Turmeric, Cardamom, Coffee, Tea, Coconut Oil, etc.")
@@ -542,54 +593,53 @@ st.markdown("**💡 Try searching for:** Apple, Banana, Rice, Wheat, Turmeric, C
 if search_button and product_input:
     with st.spinner("🔍 Searching for product information..."):
         language_code = languages[selected_language]
-        
-        # Create placeholder for results
-        result_placeholder = st.empty()
-        
-        # Create status container BELOW the search
-        status_container = st.container()
-        
-        product_info = search_product(product_input, language_code, status_container)
+        product_info = search_product(product_input, language_code)
         
         if product_info:
-            with result_placeholder.container():
-                # Display results
-                col_img, col_info = st.columns([1, 2], vertical_alignment="top")
+            # Display results
+            col_img, col_info = st.columns([1, 2])
+            
+            with col_img:
+                # Check for existing image or fetch/generate new one
+                img_path = f"images/{product_info['common_name'].lower().replace(' ', '_')}.png"
                 
-                with col_img:
-                    # Check for existing image or fetch/generate new one
-                    img_path = f"images/{product_info['common_name'].lower().replace(' ', '_')}.png"
-                    
-                    if os.path.exists(img_path):
-                        st.image(img_path, use_container_width=True)
-                    else:
-                        # Fetch or generate image
-                        with st.spinner("📷 Fetching product image..."):
-                            img = get_product_image(product_info['common_name'], img_path)
-                            st.image(img, use_container_width=True)
-                
-                with col_info:
-                    st.markdown('<div class="product-card">', unsafe_allow_html=True)
-                    
-                    st.markdown(f"<p class='info-label'>Common Name:</p><p class='info-value'>{product_info['common_name']}</p>", unsafe_allow_html=True)
-                    st.markdown(f"<p class='info-label'>HS Code:</p><p class='info-value'>{product_info['hs_code']}</p>", unsafe_allow_html=True)
-                    st.markdown(f"<p class='info-label'>Category (Family):</p><p class='info-value'>{product_info['family']}</p>", unsafe_allow_html=True)
-                    st.markdown(f"<p class='info-label'>Sub Category (Sub Family):</p><p class='info-value'>{product_info['sub_family']}</p>", unsafe_allow_html=True)
-                    st.markdown(f"<p class='info-label'>Scientific Name:</p><p class='info-value'><em>{product_info['scientific_name']}</em></p>", unsafe_allow_html=True)
-                    st.markdown(f"<p class='info-label'>Order:</p><p class='info-value'>{product_info['order']}</p>", unsafe_allow_html=True)
-                    st.markdown(f"<p class='info-label'>Genus:</p><p class='info-value'>{product_info['genus']}</p>", unsafe_allow_html=True)
-                    st.markdown(f"<p class='info-label'>Kingdom:</p><p class='info-value'>{product_info['kingdom']}</p>", unsafe_allow_html=True)
-                    
-                    st.markdown('</div>', unsafe_allow_html=True)
-                
-                # Description section
+                if os.path.exists(img_path):
+                    st.image(img_path, use_container_width=True)
+                else:
+                    # Fetch or generate image
+                    with st.spinner("📷 Fetching product image..."):
+                        img = get_product_image(product_info['common_name'], img_path)
+                        st.image(img, use_container_width=True)
+            
+            with col_info:
                 st.markdown('<div class="product-card">', unsafe_allow_html=True)
-                st.markdown(f"<p class='info-label'>Description:</p>", unsafe_allow_html=True)
-                st.write(product_info['description'])
+                
+                st.markdown(f"<p class='info-label'>Common Name:</p><p class='info-value'>{product_info['common_name']}</p>", unsafe_allow_html=True)
+                st.markdown(f"<p class='info-label'>HS Code:</p><p class='info-value'>{product_info['hs_code']}</p>", unsafe_allow_html=True)
+                st.markdown(f"<p class='info-label'>Category (Family):</p><p class='info-value'>{product_info['family']}</p>", unsafe_allow_html=True)
+                st.markdown(f"<p class='info-label'>Sub Category (Sub Family):</p><p class='info-value'>{product_info['sub_family']}</p>", unsafe_allow_html=True)
+                st.markdown(f"<p class='info-label'>Scientific Name:</p><p class='info-value'><em>{product_info['scientific_name']}</em></p>", unsafe_allow_html=True)
+                st.markdown(f"<p class='info-label'>Order:</p><p class='info-value'>{product_info['order']}</p>", unsafe_allow_html=True)
+                st.markdown(f"<p class='info-label'>Genus:</p><p class='info-value'>{product_info['genus']}</p>", unsafe_allow_html=True)
+                st.markdown(f"<p class='info-label'>Kingdom:</p><p class='info-value'>{product_info['kingdom']}</p>", unsafe_allow_html=True)
+                
                 st.markdown('</div>', unsafe_allow_html=True)
             
+            # Description section
+            st.markdown('<div class="product-card">', unsafe_allow_html=True)
+            st.markdown(f"<p class='info-label'>Description:</p>", unsafe_allow_html=True)
+            st.write(product_info['description'])
+            st.markdown('</div>', unsafe_allow_html=True)
+            
         else:
-            status_container.error("❌ Unable to fetch product information. Please try again later.")
+            st.error("❌ Unable to fetch product information.")
+            st.markdown("""
+            <div class="warning-box">
+                <strong>⚠️ No API configured!</strong><br>
+                Please set up at least one API (Groq, Hugging Face, or Ollama) to get accurate product information.
+                Check the sidebar for setup instructions.
+            </div>
+            """, unsafe_allow_html=True)
 
 elif search_button and not product_input:
     st.warning("⚠️ Please enter a product name to search.")
@@ -598,5 +648,3 @@ elif search_button and not product_input:
 st.markdown("---")
 st.markdown("💡 **Powered by AI:** This app uses advanced language models to provide accurate, real-time product information")
 st.markdown("📊 **Data Source:** AI-generated information with local caching for faster subsequent searches")
-
-
