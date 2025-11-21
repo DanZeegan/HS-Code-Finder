@@ -9,7 +9,7 @@ import time
 from io import BytesIO
 
 # Embedded API Keys
-GROQ_API_KEY = "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"
+GROQ_API_KEY = "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"
 HUGGINGFACE_API_KEY = "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"
 PEXELS_API_KEY = "fmQ9Eyr6rn8WGagZwhePDSRKHbd2FGELJDuGI19ChGAeU7eAXCrABJ5B"
 
@@ -598,4 +598,5 @@ elif search_button and not product_input:
 st.markdown("---")
 st.markdown("💡 **Powered by AI:** This app uses advanced language models to provide accurate, real-time product information")
 st.markdown("📊 **Data Source:** AI-generated information with local caching for faster subsequent searches")
+
 
